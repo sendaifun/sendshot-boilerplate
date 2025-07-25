@@ -1,103 +1,361 @@
-import Image from "next/image";
+'use client';
+
+import { useState } from 'react';
+import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { PublicKey } from '@solana/web3.js';
+import WalletButton from "./components/WalletButton";
+import { APP_NAME } from "./constants";
+
+// Import all Solana utility functions
+import { getWalletTokens, HeliusAssetsResponse } from './utils/solana/getWalletTokens';
+import { getWalletBalance } from './utils/solana/getWalletBalance';
+import { getTokenPrices, DexScreenerToken } from './utils/solana/getTokenPrices';
+import { transferSol } from './utils/solana/transfer';
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const { publicKey, sendTransaction , signTransaction } = useWallet();
+  const { connection } = useConnection();
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  // State for different demo sections
+  const [balanceResult, setBalanceResult] = useState<number | null>(null);
+  const [tokensResult, setTokensResult] = useState<HeliusAssetsResponse | null>(null);
+  const [pricesResult, setPricesResult] = useState<DexScreenerToken[]>([]);
+  const [loading, setLoading] = useState<{ [key: string]: boolean }>({});
+  const [error, setError] = useState<{ [key: string]: string }>({});
+
+  // Form states
+  const [customWalletAddress, setCustomWalletAddress] = useState('');
+  const [tokenAddresses, setTokenAddresses] = useState('So11111111111111111111111111111111111111112'); // SOL token
+  const [transferAmount, setTransferAmount] = useState('0.01');
+  const [transferTo, setTransferTo] = useState('');
+
+  const handleError = (section: string, err: any) => {
+    console.error(`Error in ${section}:`, err);
+    setError(prev => ({ ...prev, [section]: err.message || 'An error occurred' }));
+    setLoading(prev => ({ ...prev, [section]: false }));
+  };
+
+  const clearError = (section: string) => {
+    setError(prev => ({ ...prev, [section]: '' }));
+  };
+
+  // Demo function 1: Get Wallet Balance
+  const demoGetBalance = async () => {
+    const section = 'balance';
+    setLoading(prev => ({ ...prev, [section]: true }));
+    clearError(section);
+
+    try {
+      const address = customWalletAddress || publicKey?.toString();
+      if (!address) {
+        throw new Error('No wallet address provided');
+      }
+
+      const balance = await getWalletBalance(address);
+      setBalanceResult(balance);
+    } catch (err) {
+      handleError(section, err);
+    }
+    setLoading(prev => ({ ...prev, [section]: false }));
+  };
+
+  // Demo function 2: Get Wallet Tokens
+  const demoGetTokens = async () => {
+    const section = 'tokens';
+    setLoading(prev => ({ ...prev, [section]: true }));
+    clearError(section);
+
+    try {
+      const address = customWalletAddress || publicKey?.toString();
+      if (!address) {
+        throw new Error('No wallet address provided');
+      }
+
+      const tokens = await getWalletTokens(address);
+      setTokensResult(tokens);
+    } catch (err) {
+      handleError(section, err);
+    }
+    setLoading(prev => ({ ...prev, [section]: false }));
+  };
+
+  // Demo function 3: Get Token Prices
+  const demoGetPrices = async () => {
+    const section = 'prices';
+    setLoading(prev => ({ ...prev, [section]: true }));
+    clearError(section);
+
+    try {
+      const addresses = tokenAddresses.split(',').map(addr => addr.trim()).filter(Boolean);
+      if (addresses.length === 0) {
+        throw new Error('No token addresses provided');
+      }
+
+      const prices = await getTokenPrices(addresses);
+      setPricesResult(prices);
+    } catch (err) {
+      handleError(section, err);
+    }
+    setLoading(prev => ({ ...prev, [section]: false }));
+  };
+
+  // Demo function 4: Transfer SOL
+  const demoTransferSol = async () => {
+    const section = 'transfer';
+    setLoading(prev => ({ ...prev, [section]: true }));
+    clearError(section);
+
+    try {
+      if (!publicKey) {
+        throw new Error('Wallet not connected');
+      }
+      if (!transferTo) {
+        throw new Error('Recipient address required');
+      }
+
+      const toPublicKey = new PublicKey(transferTo);
+      const amount = parseFloat(transferAmount);
+
+      const transaction = await transferSol(
+        connection,
+        publicKey,
+        toPublicKey,
+        amount
+      );
+
+      
+
+      if (!transaction) {
+        throw new Error('Failed to create transaction');
+      }
+
+      const signedTransaction = await signTransaction!(transaction);
+      console.log(Buffer.from(signedTransaction.serialize()).toString('base64'));
+      await sendTransaction(signedTransaction, connection);
+      alert(`Transaction sent! Signature: ${signedTransaction}`);
+    } catch (err) {
+      handleError(section, err);
+    }
+    setLoading(prev => ({ ...prev, [section]: false }));
+  };
+
+  return (
+    <div className="flex flex-col min-h-screen">
+      <header className="w-full">
+        <nav className="flex items-center justify-between p-4 border-b">
+          <div className="text-xl font-bold">{APP_NAME}</div>
+          <WalletButton />
+        </nav>
+      </header>
+
+      <main className="flex-grow p-6 max-w-6xl mx-auto w-full">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold mb-4">Solana Functions Demo</h1>
+          <p className="text-gray-600 mb-6">
+            Test all the Solana utility functions. Connect your wallet or enter a custom address.
+          </p>
+
+          {/* Global wallet address input */}
+          <div className="bg-gray-800 p-4 rounded-lg mb-8">
+            <label className="block text-sm font-medium mb-2">
+              Custom Wallet Address (optional - will use connected wallet if empty)
+            </label>
+            <input
+              type="text"
+              placeholder="Enter wallet address..."
+              className="w-full p-2 border rounded bg-gray-800 text-white border-gray-600 placeholder-gray-400"
+              value={customWalletAddress}
+              onChange={(e) => setCustomWalletAddress(e.target.value)}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            <p className="text-xs text-gray-500 mt-1">
+              Connected: {publicKey?.toString() || 'No wallet connected'}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Get Wallet Balance */}
+          <div className="border rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">1. Get Wallet Balance</h2>
+            <p className="text-gray-600 mb-4">Get the SOL balance of any wallet</p>
+            
+            <button
+              onClick={demoGetBalance}
+              disabled={loading.balance}
+              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50"
+            >
+              {loading.balance ? 'Loading...' : 'Get Balance'}
+            </button>
+
+            {error.balance && (
+              <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+                {error.balance}
+              </div>
+            )}
+
+            {balanceResult !== null && (
+              <div className="mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded">
+                <strong>Balance: {balanceResult.toFixed(4)} SOL</strong>
+              </div>
+            )}
+          </div>
+
+          {/* Get Wallet Tokens */}
+          <div className="border rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">2. Get Wallet Tokens</h2>
+            <p className="text-gray-600 mb-4">Get all tokens/NFTs owned by a wallet</p>
+            
+            <button
+              onClick={demoGetTokens}
+              disabled={loading.tokens}
+              className="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 disabled:opacity-50"
+            >
+              {loading.tokens ? 'Loading...' : 'Get Tokens'}
+            </button>
+
+            {error.tokens && (
+              <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+                {error.tokens}
+              </div>
+            )}
+
+            {tokensResult && (
+              <div className="mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded max-h-60 overflow-y-auto">
+                <strong>Found {tokensResult.total} tokens</strong>
+                <div className="mt-2 text-sm">
+                  {tokensResult.items.slice(0, 5).map((token, index) => (
+                    <div key={index} className="border-b py-1">
+                      <div>ID: {token.id}</div>
+                      <div>Interface: {token.interface}</div>
+                    </div>
+                  ))}
+                  {tokensResult.items.length > 5 && (
+                    <div className="pt-2 text-gray-600">
+                      ... and {tokensResult.items.length - 5} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Get Token Prices */}
+          <div className="border rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">3. Get Token Prices</h2>
+            <p className="text-gray-600 mb-4">Get current prices from DexScreener</p>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">
+                Token Addresses (comma-separated)
+              </label>
+                             <input
+                 type="text"
+                 placeholder="Enter token addresses..."
+                 className="w-full p-2 border rounded bg-gray-800 text-white border-gray-600 placeholder-gray-400"
+                 value={tokenAddresses}
+                 onChange={(e) => setTokenAddresses(e.target.value)}
+               />
+              <p className="text-xs text-gray-500 mt-1">
+                Default: SOL token address
+              </p>
+            </div>
+
+            <button
+              onClick={demoGetPrices}
+              disabled={loading.prices}
+              className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50"
+            >
+              {loading.prices ? 'Loading...' : 'Get Prices'}
+            </button>
+
+            {error.prices && (
+              <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+                {error.prices}
+              </div>
+            )}
+
+            {pricesResult.length > 0 && (
+              <div className="mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded max-h-60 overflow-y-auto">
+                <strong>Found {pricesResult.length} price(s)</strong>
+                <div className="mt-2 text-sm">
+                  {pricesResult.map((token, index) => (
+                    <div key={index} className="border-b py-2">
+                      <div><strong>{token.baseToken.symbol}</strong></div>
+                      <div>Price: ${parseFloat(token.priceUsd).toFixed(6)}</div>
+                      <div>24h Change: {token.priceChange.h24?.toFixed(2) || 'N/A'}%</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Transfer SOL */}
+          <div className="border rounded-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">4. Transfer SOL</h2>
+            <p className="text-gray-600 mb-4">Send SOL to another wallet (requires connected wallet)</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Recipient Address
+                </label>
+                                 <input
+                   type="text"
+                   placeholder="Enter recipient wallet address..."
+                   className="w-full p-2 border rounded bg-gray-800 text-white border-gray-600 placeholder-gray-400"
+                   value={transferTo}
+                   onChange={(e) => setTransferTo(e.target.value)}
+                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Amount (SOL)
+                </label>
+                                 <input
+                   type="number"
+                   step="0.001"
+                   placeholder="0.01"
+                   className="w-full p-2 border rounded bg-gray-800 text-white border-gray-600 placeholder-gray-400"
+                   value={transferAmount}
+                   onChange={(e) => setTransferAmount(e.target.value)}
+                 />
+              </div>
+            </div>
+
+            <button
+              onClick={demoTransferSol}
+              disabled={loading.transfer || !publicKey}
+              className="mt-4 bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 disabled:opacity-50"
+            >
+              {loading.transfer ? 'Processing...' : 'Transfer SOL'}
+            </button>
+
+            {!publicKey && (
+              <p className="mt-2 text-sm text-yellow-600">
+                Connect your wallet to use this feature
+              </p>
+            )}
+
+            {error.transfer && (
+              <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+                {error.transfer}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-8 p-4 bg-gray-800 rounded-lg">
+          <h3 className="text-lg font-semibold mb-2">Function Descriptions:</h3>
+          <ul className="space-y-2 text-sm">
+            <li><strong>getWalletBalance:</strong> Fetches SOL balance using Solana RPC</li>
+            <li><strong>getWalletTokens:</strong> Gets all tokens/NFTs using Helius API</li>
+            <li><strong>getTokenPrices:</strong> Fetches current token prices from DexScreener</li>
+            <li><strong>transferSol:</strong> Creates and sends a SOL transfer transaction</li>
+          </ul>
         </div>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
